@@ -97,57 +97,54 @@ impl<F: PrimeField> R1CS<F> {
             }
         }
 
+        // Converts terms from one linear combination in the first system to the second system.
+        let convert_linear_combination = |lc: &LinearCombination<F>| -> snarkvm_algorithms::r1cs::LinearCombination<F> {
+            // Initialize a linear combination for the second system.
+            let mut linear_combination = snarkvm_algorithms::r1cs::LinearCombination::<F>::zero();
+
+            // Process every term in the linear combination.
+            for (variable, coefficient) in lc.to_terms() {
+                match variable {
+                    Variable::Constant(_) => {
+                        unreachable!(
+                            "Failed during constraint translation. The first system by definition cannot have constant variables in the terms"
+                        )
+                    }
+                    Variable::Public(index, _) => {
+                        let gadget = converter.public.get(index).unwrap();
+                        assert_eq!(
+                            snarkvm_algorithms::r1cs::Index::Public((index + 1) as usize),
+                            gadget.get_unchecked(),
+                            "Failed during constraint translation. The public variable in the second system must match the first system (with an off-by-1 for the public case)"
+                        );
+                        linear_combination += (*coefficient, *gadget);
+                    }
+                    Variable::Private(index, _) => {
+                        let gadget = converter.private.get(index).unwrap();
+                        assert_eq!(
+                            snarkvm_algorithms::r1cs::Index::Private(*index as usize),
+                            gadget.get_unchecked(),
+                            "Failed during constraint translation. The private variable in the second system must match the first system"
+                        );
+                        linear_combination += (*coefficient, *gadget);
+                    }
+                }
+            }
+
+            // Finally, add the accumulated constant value to the linear combination.
+            if !lc.to_constant().is_zero() {
+                linear_combination += (
+                    lc.to_constant(),
+                    snarkvm_algorithms::r1cs::Variable::new_unchecked(snarkvm_algorithms::r1cs::Index::Public(0)),
+                );
+            }
+
+            // Return the linear combination of the second system.
+            linear_combination
+        };
+
         // Enforce all of the constraints.
         for (i, constraint) in self.to_constraints().iter().enumerate() {
-            // Converts terms from one linear combination in the first system to the second system.
-            let convert_linear_combination =
-                |lc: &LinearCombination<F>| -> snarkvm_algorithms::r1cs::LinearCombination<F> {
-                    // Initialize a linear combination for the second system.
-                    let mut linear_combination = snarkvm_algorithms::r1cs::LinearCombination::<F>::zero();
-
-                    // Process every term in the linear combination.
-                    for (variable, coefficient) in lc.to_terms() {
-                        match variable {
-                            Variable::Constant(_) => {
-                                unreachable!(
-                                    "Failed during constraint translation. The first system by definition cannot have constant variables in the terms"
-                                )
-                            }
-                            Variable::Public(index, _) => {
-                                let gadget = converter.public.get(index).unwrap();
-                                assert_eq!(
-                                    snarkvm_algorithms::r1cs::Index::Public((index + 1) as usize),
-                                    gadget.get_unchecked(),
-                                    "Failed during constraint translation. The public variable in the second system must match the first system (with an off-by-1 for the public case)"
-                                );
-                                linear_combination += (*coefficient, *gadget);
-                            }
-                            Variable::Private(index, _) => {
-                                let gadget = converter.private.get(index).unwrap();
-                                assert_eq!(
-                                    snarkvm_algorithms::r1cs::Index::Private(*index as usize),
-                                    gadget.get_unchecked(),
-                                    "Failed during constraint translation. The private variable in the second system must match the first system"
-                                );
-                                linear_combination += (*coefficient, *gadget);
-                            }
-                        }
-                    }
-
-                    // Finally, add the accumulated constant value to the linear combination.
-                    if !lc.to_constant().is_zero() {
-                        linear_combination += (
-                            lc.to_constant(),
-                            snarkvm_algorithms::r1cs::Variable::new_unchecked(snarkvm_algorithms::r1cs::Index::Public(
-                                0,
-                            )),
-                        );
-                    }
-
-                    // Return the linear combination of the second system.
-                    linear_combination
-                };
-
             let (a, b, c) = constraint.to_terms();
 
             cs.enforce(
@@ -156,23 +153,23 @@ impl<F: PrimeField> R1CS<F> {
                 |lc| lc + convert_linear_combination(b),
                 |lc| lc + convert_linear_combination(c),
             );
+        }
 
-            // Add the lookup tables.
-            for table in &self.tables {
-                cs.add_lookup_table(table.clone())
-            }
+        // Add the lookup tables.
+        for table in self.to_lookup_tables() {
+            cs.add_lookup_table(table.clone())
+        }
 
-            // Enforce all of the lookup constraints.
-            for (i, constraint) in self.to_lookup_constraints().iter().enumerate() {
-                let (a, b, c, table_index) = constraint.to_terms();
-                cs.enforce_lookup(
-                    || format!("Lookup Constraint {i}"),
-                    |lc| lc + convert_linear_combination(a),
-                    |lc| lc + convert_linear_combination(b),
-                    |lc| lc + convert_linear_combination(c),
-                    table_index,
-                )?;
-            }
+        // Enforce all of the lookup constraints.
+        for (i, constraint) in self.to_lookup_constraints().iter().enumerate() {
+            let (a, b, c, table_index) = constraint.to_terms();
+            cs.enforce_lookup(
+                || format!("Lookup Constraint {i}"),
+                |lc| lc + convert_linear_combination(a),
+                |lc| lc + convert_linear_combination(b),
+                |lc| lc + convert_linear_combination(c),
+                table_index,
+            )?;
         }
 
         // Ensure the given `cs` matches in size with the first system.

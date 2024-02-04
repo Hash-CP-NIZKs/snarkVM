@@ -32,7 +32,7 @@ pub struct R1CS<F: PrimeField> {
     constraints: Vec<Constraint<F>>,
     lookup_constraints: Vec<LookupConstraint<F>>,
     counter: Counter<F>,
-    pub(crate) tables: Vec<LookupTable<F>>,
+    tables: Vec<LookupTable<F>>,
     nonzeros: (u64, u64, u64),
 }
 
@@ -205,6 +205,12 @@ impl<F: PrimeField> R1CS<F> {
     pub(crate) fn to_lookup_constraints(&self) -> &Vec<LookupConstraint<F>> {
         &self.lookup_constraints
     }
+
+    /// Returns the lookup constraints in the constraint system.
+    pub(crate) fn to_lookup_tables(&self) -> &Vec<LookupTable<F>> {
+        &self.tables
+    }
+
 }
 
 impl<F: PrimeField> Display for R1CS<F> {
