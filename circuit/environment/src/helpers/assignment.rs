@@ -292,7 +292,7 @@ impl<F: PrimeField> snarkvm_algorithms::r1cs::ConstraintSynthesizer<F> for Assig
         // Ensure the given `cs` matches in size with the first system.
         assert_eq!(self.num_public() + 1, cs.num_public_variables() as u64);
         assert_eq!(self.num_private(), cs.num_private_variables() as u64);
-        assert_eq!(self.num_constraints(), cs.num_constraints() as u64);
+        assert_eq!(self.num_constraints() + self.num_lookup_constraints(), cs.num_constraints() as u64);
 
         Ok(())
     }
