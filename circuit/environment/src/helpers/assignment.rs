@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use crate::Index;
 use snarkvm_algorithms::r1cs::LookupTable;
 use snarkvm_fields::PrimeField;
@@ -75,15 +77,201 @@ impl<F: PrimeField> AssignmentLC<F> {
     }
 }
 
+#[derive(Clone, Debug)]
+struct PubAndPrivVariables<F: PrimeField> {
+    pub(crate) public: IndexMap<Index, F>,
+    pub(crate) private: IndexMap<Index, F>,
+}
+
+/// A struct like Assignment, but for memory saving.
+#[derive(Clone, Debug)]
+pub struct SameCircuitAssignment<F: PrimeField> {
+    variables: Option<PubAndPrivVariables<F>>,
+    base: Arc<Assignment<F>>,
+}
+
+impl<F: PrimeField> SameCircuitAssignment<F> {
+    /// The caller should ensure that base and another are same circuit and may with different variable values.
+    pub fn create_with_base(base: Arc<Assignment<F>>, another: Assignment<F>) -> Self {
+        assert_eq!(base.num_public(), another.num_public());
+        assert_eq!(base.num_private(), another.num_private());
+        Self { variables: Some(PubAndPrivVariables { public: another.public, private: another.private }), base }
+    }
+
+    pub fn single_one(base: Assignment<F>) -> Self {
+        Self { variables: None, base: Arc::new(base) }
+    }
+
+    /// Returns the public inputs of the assignment.
+    pub fn public_inputs(&self) -> &IndexMap<Index, F> {
+        match &self.variables {
+            Some(v) => &v.public,
+            None => &self.base.public,
+        }
+    }
+
+    /// Returns the private inputs of the assignment.
+    pub fn private_inputs(&self) -> &IndexMap<Index, F> {
+        match &self.variables {
+            Some(v) => &v.private,
+            None => &self.base.private,
+        }
+    }
+
+    /// Returns the number of public variables in the assignment.
+    pub fn num_public(&self) -> u64 {
+        self.public_inputs().len() as u64
+    }
+
+    /// Returns the number of private variables in the assignment.
+    pub fn num_private(&self) -> u64 {
+        self.private_inputs().len() as u64
+    }
+}
+
+impl<F: PrimeField> snarkvm_algorithms::r1cs::ConstraintSynthesizer<F> for SameCircuitAssignment<F> {
+    /// Synthesizes the constraints from the environment into a `snarkvm_algorithms::r1cs`-compliant constraint system.
+    fn generate_constraints<CS: snarkvm_algorithms::r1cs::ConstraintSystem<F>>(
+        &self,
+        cs: &mut CS,
+    ) -> Result<(), snarkvm_algorithms::r1cs::SynthesisError> {
+        /// A struct for tracking the mapping of variables from the virtual machine (first) to the gadget constraint system (second).
+        struct Converter {
+            public: IndexMap<u64, snarkvm_algorithms::r1cs::Variable>,
+            private: IndexMap<u64, snarkvm_algorithms::r1cs::Variable>,
+        }
+
+        let mut converter = Converter { public: Default::default(), private: Default::default() };
+
+        // Ensure the given `cs` is starting off clean.
+        assert_eq!(1, cs.num_public_variables());
+        assert_eq!(0, cs.num_private_variables());
+        assert_eq!(0, cs.num_constraints());
+
+        // Allocate the public variables.
+        for (i, (index, value)) in self.public_inputs().iter().enumerate() {
+            assert_eq!(i as u64, *index, "Public variables in first system must be processed in lexicographic order");
+
+            let gadget = cs.alloc_input(|| format!("Public {i}"), || Ok(*value))?;
+
+            assert_eq!(
+                snarkvm_algorithms::r1cs::Index::Public((index + 1) as usize),
+                gadget.get_unchecked(),
+                "Public variables in the second system must match the first system (with an off-by-1 for the public case)"
+            );
+
+            let result = converter.public.insert(*index, gadget);
+
+            assert!(result.is_none(), "Overwrote an existing public variable in the converter");
+        }
+
+        // Allocate the private variables.
+        for (i, (index, value)) in self.private_inputs().iter().enumerate() {
+            assert_eq!(i as u64, *index, "Private variables in first system must be processed in lexicographic order");
+
+            let gadget = cs.alloc(|| format!("Private {i}"), || Ok(*value))?;
+
+            assert_eq!(
+                snarkvm_algorithms::r1cs::Index::Private(i),
+                gadget.get_unchecked(),
+                "Private variables in the second system must match the first system"
+            );
+
+            let result = converter.private.insert(*index, gadget);
+
+            assert!(result.is_none(), "Overwrote an existing private variable in the converter");
+        }
+
+        // Converts terms from one linear combination in the first system to the second system.
+        let convert_linear_combination = |lc: &AssignmentLC<F>| -> snarkvm_algorithms::r1cs::LinearCombination<F> {
+            // Initialize a linear combination for the second system.
+            let mut linear_combination = snarkvm_algorithms::r1cs::LinearCombination::<F>::zero();
+
+            // Process every term in the linear combination.
+            for (variable, coefficient) in lc.terms.iter() {
+                match variable {
+                    AssignmentVariable::Constant(_) => {
+                        unreachable!(
+                            "Failed during constraint translation. The first system by definition cannot have constant variables in the terms"
+                        )
+                    }
+                    AssignmentVariable::Public(index) => {
+                        let gadget = converter.public.get(index).unwrap();
+                        assert_eq!(
+                            snarkvm_algorithms::r1cs::Index::Public((index + 1) as usize),
+                            gadget.get_unchecked(),
+                            "Failed during constraint translation. The public variable in the second system must match the first system (with an off-by-1 for the public case)"
+                        );
+                        linear_combination += (*coefficient, *gadget);
+                    }
+                    AssignmentVariable::Private(index) => {
+                        let gadget = converter.private.get(index).unwrap();
+                        assert_eq!(
+                            snarkvm_algorithms::r1cs::Index::Private(*index as usize),
+                            gadget.get_unchecked(),
+                            "Failed during constraint translation. The private variable in the second system must match the first system"
+                        );
+                        linear_combination += (*coefficient, *gadget);
+                    }
+                }
+            }
+
+            // Finally, add the accumulated constant value to the linear combination.
+            if !lc.constant.is_zero() {
+                linear_combination += (
+                    lc.constant,
+                    snarkvm_algorithms::r1cs::Variable::new_unchecked(snarkvm_algorithms::r1cs::Index::Public(0)),
+                );
+            }
+
+            // Return the linear combination of the second system.
+            linear_combination
+        };
+
+        // Enforce all of the constraints.
+        for (i, (a, b, c)) in self.base.constraints.iter().enumerate() {
+            cs.enforce(
+                || format!("Constraint {i}"),
+                |lc| lc + convert_linear_combination(a),
+                |lc| lc + convert_linear_combination(b),
+                |lc| lc + convert_linear_combination(c),
+            );
+        }
+
+        // Add the lookup tables.
+        for table in &self.base.tables {
+            cs.add_lookup_table(table.clone())
+        }
+
+        // Enforce all of the lookup constraints.
+        for (i, (a, b, c, table_index)) in self.base.lookup_constraints.iter().enumerate() {
+            cs.enforce_lookup(
+                || format!("Lookup Constraint {i}"),
+                |lc| lc + convert_linear_combination(a),
+                |lc| lc + convert_linear_combination(b),
+                |lc| lc + convert_linear_combination(c),
+                *table_index,
+            )?;
+        }
+
+        // Ensure the given `cs` matches in size with the first system.
+        assert_eq!(self.num_public() + 1, cs.num_public_variables() as u64);
+        assert_eq!(self.num_private(), cs.num_private_variables() as u64);
+        assert_eq!(self.base.num_constraints() + self.base.num_lookup_constraints(), cs.num_constraints() as u64);
+
+        Ok(())
+    }
+}
+
 /// A struct that contains public variable assignments, private variable assignments,
 /// and constraint assignments.
 #[derive(Clone, Debug)]
 pub struct Assignment<F: PrimeField> {
-    public: IndexMap<Index, F>,
-    private: IndexMap<Index, F>,
-    constraints: Vec<(AssignmentLC<F>, AssignmentLC<F>, AssignmentLC<F>)>,
-    tables: Vec<LookupTable<F>>,
-    lookup_constraints: Vec<(AssignmentLC<F>, AssignmentLC<F>, AssignmentLC<F>, usize)>,
+    pub(crate) public: IndexMap<Index, F>,
+    pub(crate) private: IndexMap<Index, F>,
+    pub(crate) constraints: Vec<(AssignmentLC<F>, AssignmentLC<F>, AssignmentLC<F>)>,
+    pub(crate) tables: Vec<LookupTable<F>>,
+    pub(crate) lookup_constraints: Vec<(AssignmentLC<F>, AssignmentLC<F>, AssignmentLC<F>, usize)>,
 }
 
 impl<F: PrimeField> From<crate::R1CS<F>> for Assignment<F> {
