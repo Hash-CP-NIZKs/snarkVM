@@ -114,13 +114,15 @@ impl<F: PrimeField, MM: SNARKMode> AHPForR1CS<F, MM> {
     }
 
     /// Get all the strict degree bounds enforced in the AHP.
-    pub fn get_degree_bounds(info: &CircuitInfo) -> [usize; 4] {
+    pub fn get_degree_bounds(info: &CircuitInfo) -> [usize; 5] {
         let num_variables = info.num_variables;
+        let num_constraints = info.num_constraints;
         let num_non_zero_a = info.num_non_zero_a;
         let num_non_zero_b = info.num_non_zero_b;
         let num_non_zero_c = info.num_non_zero_c;
         [
             EvaluationDomain::<F>::compute_size_of_domain(num_variables).unwrap() - 2,
+            EvaluationDomain::<F>::compute_size_of_domain(num_constraints).unwrap() - 2,
             EvaluationDomain::<F>::compute_size_of_domain(num_non_zero_a).unwrap() - 2,
             EvaluationDomain::<F>::compute_size_of_domain(num_non_zero_b).unwrap() - 2,
             EvaluationDomain::<F>::compute_size_of_domain(num_non_zero_c).unwrap() - 2,
