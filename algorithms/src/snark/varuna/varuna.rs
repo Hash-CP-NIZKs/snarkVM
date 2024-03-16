@@ -87,7 +87,7 @@ impl<E: PairingEngine, FS: AlgebraicSponge<E::Fq, 2>, MM: SNARKMode> VarunaSNARK
                 .download_powers_for(0..indexed_circuit.max_degree())
                 .map_err(|e| anyhow!("Failed to download powers for degree {}: {e}", indexed_circuit.max_degree()))?;
             let coefficient_support = AHPForR1CS::<E::Fr, MM>::get_degree_bounds(&indexed_circuit.index_info);
-
+            println!("coefficient_support: {:?} {:?}",coefficient_support,indexed_circuit.index_info);
             // Varuna only needs degree 2 random polynomials.
             let supported_hiding_bound = AHPForR1CS::<E::Fr, MM>::zk_bound().unwrap_or(0);
             let supported_lagrange_sizes = [].into_iter(); // TODO: consider removing lagrange_bases_at_beta_g from CommitterKey

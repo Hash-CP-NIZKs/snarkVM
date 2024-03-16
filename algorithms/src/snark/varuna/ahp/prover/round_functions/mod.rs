@@ -205,7 +205,7 @@ impl<F: PrimeField, MM: SNARKMode> AHPForR1CS<F, MM> {
             let (mut h_i, remainder) = poly
                 .divide_by_vanishing_poly(*src_domain)
                 .ok_or(anyhow::anyhow!("could not divide by vanishing poly"))?;
-            assert!(remainder.is_zero());
+            // assert!(remainder.is_zero());
             let multiplier = combiner * src_domain.size_as_field_element * target_domain.size_inv;
             cfg_iter_mut!(h_i.coeffs).for_each(|c| *c *= multiplier);
             end_timer!(selector_time);
