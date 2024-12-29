@@ -428,7 +428,7 @@ impl<E: PairingEngine> KZG10<E> {
     ) -> Result<(), PCError> {
         let p = p.into();
         if let Some(bound) = p.degree_bound() {
-            println!("enforced_degree_bounds: {:?}",enforced_degree_bounds);
+            // println!("enforced_degree_bounds: {:?}",enforced_degree_bounds);
             let enforced_degree_bounds = enforced_degree_bounds.ok_or(PCError::UnsupportedDegreeBound(bound))?;
 
             if enforced_degree_bounds.binary_search(&bound).is_err() {

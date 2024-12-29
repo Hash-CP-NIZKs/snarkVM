@@ -87,7 +87,7 @@ impl<E: PairingEngine, FS: AlgebraicSponge<E::Fq, 2>, MM: SNARKMode> VarunaSNARK
                 .download_powers_for(0..indexed_circuit.max_degree())
                 .map_err(|e| anyhow!("Failed to download powers for degree {}: {e}", indexed_circuit.max_degree()))?;
             let coefficient_support = AHPForR1CS::<E::Fr, MM>::get_degree_bounds(&indexed_circuit.index_info);
-            println!("coefficient_support: {:?} {:?}",coefficient_support,indexed_circuit.index_info);
+            // println!("coefficient_support: {:?} {:?}",coefficient_support,indexed_circuit.index_info);
             // Varuna only needs degree 2 random polynomials.
             let supported_hiding_bound = AHPForR1CS::<E::Fr, MM>::zk_bound().unwrap_or(0);
             let supported_lagrange_sizes = [].into_iter(); // TODO: consider removing lagrange_bases_at_beta_g from CommitterKey
@@ -108,8 +108,8 @@ impl<E: PairingEngine, FS: AlgebraicSponge<E::Fq, 2>, MM: SNARKMode> VarunaSNARK
             end_timer!(commit_time);
 
             circuit_commitments.sort_by(|c1, c2| c1.label().cmp(c2.label()));
-            println!("indexing circuit_commitments: {:?}", circuit_commitments);
-            println!("indexing circuit_commitment_randomness: {:?}", circuit_commitment_randomness);
+            // println!("indexing circuit_commitments: {:?}", circuit_commitments);
+            // println!("indexing circuit_commitment_randomness: {:?}", circuit_commitment_randomness);
             let circuit_commitments = circuit_commitments.into_iter().map(|c| *c.commitment()).collect();
             indexed_circuit.prune_row_col_evals();
             let circuit_verifying_key = CircuitVerifyingKey {

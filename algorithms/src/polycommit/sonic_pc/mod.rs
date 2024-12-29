@@ -673,7 +673,7 @@ impl<E: PairingEngine, S: AlgebraicSponge<E::Fq, 2>> SonicKZG10<E, S> {
             let shift_power = if let Some(degree_bound) = degree_bound {
                 // Find the appropriate prepared shift for the degree bound.
            
-                println!("keys: {:?}",      vk.prepared_negative_powers_of_beta_h.keys().collect::<Vec<_>>());
+                // println!("keys: {:?}",      vk.prepared_negative_powers_of_beta_h.keys().collect::<Vec<_>>());
                 vk.prepared_negative_powers_of_beta_h
                     .get(&degree_bound)
                     .cloned()
